@@ -1,21 +1,26 @@
-'use client';
+'use client'; // 👈 VERY IMPORTANT
 
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 
-const VerifyEmailPage = () => {
-  const router = useRouter();
+export default function VerifyEmailPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <VerifyEmail />
+    </Suspense>
+  );
+}
+
+function VerifyEmail() {
   const searchParams = useSearchParams();
-  const token = searchParams.get('token');
-
+  const router = useRouter();
   const [message, setMessage] = useState('Verifying your email...');
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const verifyEmail = async () => {
+      const token = searchParams.get('token');
       if (!token) {
-        setMessage('Invalid or missing token.');
-        setLoading(false);
+        setMessage('No token found!');
         return;
       }
 
@@ -24,31 +29,26 @@ const VerifyEmailPage = () => {
         const data = await res.json();
 
         if (res.ok) {
-          setMessage('✅ Email verified successfully! Redirecting to login...');
+          setMessage('Email verified successfully!');
+          // Optionally redirect after few seconds
           setTimeout(() => {
-            router.push('/login'); // after successful verification, go to login
+            router.push('/login'); // or wherever you want
           }, 3000);
         } else {
-          setMessage(`❌ ${data.message}`);
+          setMessage(data.message || 'Verification failed');
         }
       } catch (error) {
-        setMessage('❌ Something went wrong. Please try again.');
-      } finally {
-        setLoading(false);
+        console.error('Verification error', error);
+        setMessage('Something went wrong.');
       }
     };
 
     verifyEmail();
-  }, [token, router]);
+  }, [searchParams, router]);
 
   return (
-    <section className="flex items-center justify-center min-h-screen">
-      <div className="text-center">
-        <h1 className="text-2xl font-semibold">{message}</h1>
-        {loading && <p className="text-gray-500 mt-4">Please wait...</p>}
-      </div>
-    </section>
+    <div className="flex justify-center items-center h-screen">
+      <h1 className="text-2xl font-bold">{message}</h1>
+    </div>
   );
-};
-
-export default VerifyEmailPage;
+}
