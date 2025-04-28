@@ -40,7 +40,9 @@ const LoginForm = () => {
       const data = await res.json();
       if (res.ok) {
         console.log('User created successfully', data);
-        router.push('/home');
+        alert('Signup successful! Please check your email to verify your account.');
+        router.push('/verify-email'); // You can make this page
+
       } else {
         console.log('User creation failed', data);
       }
