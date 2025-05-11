@@ -1,102 +1,122 @@
 'use client';
-import { zodResolver } from '@hookform/resolvers/zod';
-import React from 'react';
-import { useForm } from 'react-hook-form';
+
+import { useState } from 'react';
 import { z } from 'zod';
-import { Form, FormField, FormItem, FormLabel, FormMessage } from '../ui/form';
-import { Button } from '../ui/button';
-import Router from 'next/router';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import {
+  Form,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormControl,
+  FormMessage,
+} from '@/components/ui/form';
+import { toast } from 'react-toastify';
 import { useRouter } from 'next/navigation';
 
-const formSchema = z.object({
-  email: z.string().email({ message: 'Invalid email address' }),
-  password: z.string().min(6, { message: 'Invaild passowrd' }),
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phoneRegex = /^\d{10}$/;
+
+const loginSchema = z.object({
+  identifier: z
+    .string()
+    .nonempty('Email or phone is required')
+    .refine(
+      (val) => emailRegex.test(val) || phoneRegex.test(val),
+      'Must be a valid email or 10-digit phone number'
+    ),
+  password: z.string().min(6, 'Password must be at least 6 characters'),
 });
-const LoginPage = () => {
-  const router = useRouter();
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
+
+type LoginFormData = z.infer<typeof loginSchema>;
+
+export default function LoginPage() {
+  const form = useForm<LoginFormData>({
+    resolver: zodResolver(loginSchema),
     defaultValues: {
-      email: '',
+      identifier: '',
       password: '',
     },
   });
 
-  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  const router = useRouter();
+
+  const handleLogin = async (data: LoginFormData) => {
+    setIsLoggingIn(true);
+
     try {
-      const res = await fetch('api/login', {
+      const res = await fetch('/api/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(values),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
       });
-      const data = await res.json();
-      if (res.ok) {
-        console.log('Login Success', data);
-        router.push('/home');
-      } else {
-        console.error('Login Failed', data.message);
-        alert(data.message || 'Login failed');
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || 'Login failed');
       }
-    } catch (error) {
-      console.error('An error occurred:', error);
-      alert('Something went wrong');
+
+      toast.success('Login successful!');
+
+      if (result.token) {
+        localStorage.setItem('token', result.token);
+      }
+
+      router.push('/'); // redirect to home/dashboard
+    } catch (error: any) {
+      toast.error(error.message || 'Something went wrong');
+    } finally {
+      setIsLoggingIn(false);
     }
   };
+
   return (
-    <section className='flex flex-col items-center justify-center h-screen '>
+    <div className='max-w-md mx-auto mt-20 p-6 bg-white rounded-2xl shadow-md'>
+      <h2 className='text-2xl font-semibold text-center mb-6'>Login</h2>
       <Form {...form}>
-        <form
-          onSubmit={form.handleSubmit(onSubmit)}
-          className='flex flex-col gap-6 bg-white shadow-2xl p-20'
-        >
+        <form onSubmit={form.handleSubmit(handleLogin)} className='space-y-5'>
           <FormField
             control={form.control}
-            name='email'
+            name='identifier'
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Email</FormLabel>
-                <input
-                  {...field}
-                  type='email'
-                  placeholder='Enter your email'
-                  className='border-2 p-4 rounded-md'
-                />
+                <FormLabel>Email or Mobile</FormLabel>
+                <FormControl>
+                  <Input
+                    placeholder='example@email.com or 9876543210'
+                    {...field}
+                  />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
           />
+
           <FormField
             control={form.control}
             name='password'
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Password</FormLabel>
-                <input
-                  {...field}
-                  placeholder='Enter your password'
-                  className='border-2 p-4 rounded-md'
-                  type='password'
-                />
+                <FormControl>
+                  <Input type='password' placeholder='••••••••' {...field} />
+                </FormControl>
                 <FormMessage />
               </FormItem>
             )}
-          ></FormField>
-          <Button
-            type='submit'
-            className='bg-blue-500 text-white p-4 rounded-md hover:bg-blue-600'
-          >
-            Login
+          />
+
+          <Button className='w-full' type='submit' disabled={isLoggingIn}>
+            {isLoggingIn ? 'Logging in...' : 'Login'}
           </Button>
-          <Button>
-            Forgot Password?
-          </Button>
-          
         </form>
       </Form>
-    </section>
+    </div>
   );
-};
-
-export default LoginPage;
+}

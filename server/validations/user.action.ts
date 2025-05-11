@@ -1,101 +1,124 @@
 'use server';
-import { connectToDB } from '@/lib/mongoose';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import User from '../models/User'; 
-import { transporter, mailOptions } from '@/lib/nodemailer';
-import crypto from 'crypto';
 
-if(!process.env.JWT_SECRET) {
-    throw new Error('JWT_SECRET is not defined in the environment variables');
-}
+import { connectToDB } from '@/server/mongoose';
+import bcrypt from 'bcryptjs';
+import User from '../models/User';
+import { transporter, sendEmail } from '../../lib/nodemailer';
+import { sendSms } from '@/lib/sendSms'; // (make sure you have this)
+import { isEmail, isPhoneNumber } from '@/lib/validators'; // validation helpers
+
 const JWT_SECRET = process.env.JWT_SECRET;
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET is not defined in environment variables');
+}
+
 
 interface CreateUserProps {
-  email: string;
-  username: string;
+  contact: string;
   password: string;
 }
 
-interface LoginUserProps {
-  email: string;
-  password: string;
-}
-
-// Create User
-export async function CreateUser({ email, username, password }: CreateUserProps) {
+export const createUser = async ({ contact, password }: CreateUserProps) => {
   try {
-    await connectToDB();
-    const userExists = await User.findOne({ email });
-    if (userExists) {
-      throw new Error("User already exists");
+    await connectToDB(); // Connect MongoDB
+
+    let email: string | null = null;
+    let phone: string | null = null;
+
+    if (isEmail(contact)) {
+      email = contact;
+    } else if (isPhoneNumber(contact)) {
+      phone = contact;
+    } else {
+      throw new Error('Invalid email or phone number format');
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const verificationToken= crypto.randomBytes(32).toString('hex');
-    const newUser = await User.create({ 
-        email, 
-        username, 
-        password: hashedPassword,
-        isVerified: false,
-        verificationToken,
+    // Check if user exists by email or phone
+    const existingUser = await User.findOne({
+      $or: [{ email }, { phone }],
     });
-    const verifyLink = `${process.env.BASE_URL}/verify-email?token=${verificationToken}`;
-    await transporter.sendMail({
-        ...mailOptions,
-        to:email,
-        subject: 'Verify your email',
-        html: `<p>Hi ${username},</p>
-        <p>Click below to verify your email:</p>
-        <a href="${verifyLink}">${verifyLink}</a>`,
-    })
+
+    if (existingUser) {
+      throw new Error('User already exists');
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Create new user
+    const newUser = await User.create({
+      email,
+      phone,
+      password: hashedPassword,
+      otp,
+      otpExpiration: Date.now() + 10 * 60 * 1000, // 10 minutes
+      isVerified: false,
+    });
+
+    // Send OTP via email or SMS
+    const otpMessage = `Your OTP is: ${otp}. It will expire in 10 minutes.`;
+
+    if (email) {
+      await transporter.sendMail({
+        ...sendEmail,
+        to: email,
+        subject: 'Your OTP for Verification',
+        html: `<p>${otpMessage}</p>`,
+      });
+    } else if (phone) {
+      await sendSms(phone, otp);
+    }
+
     return {
       success: true,
-      message: "User created successfully",
+      message: 'User created successfully. OTP sent!',
       userId: newUser._id,
     };
   } catch (error: any) {
-    console.error("Signup error:", error.message || error);
-    throw new Error(error.message || "Unable to create user");
-}
-}
-
-// Login User
-export async function loginUser({ email, password }: LoginUserProps) {
-  try {
-    await connectToDB();
-    const user = await User.findOne({ email });
-    if (!user) {
-      throw new Error("User not found. Please sign up.");
-    }
-
-    const isPassMatch = await bcrypt.compare(password, user.password);
-    if (!isPassMatch) {
-      throw new Error("Invalid credentials");
-    }
-
-    const token = jwt.sign(
-      {
-        userId: user._id,
-        email: user.email,
-      },
-      JWT_SECRET,
-      { expiresIn: '6h' }
-    );
-    console.log('Generated JWT Token:', token);
-
-    return {
-      success: true,
-      message: "Login successful",
-      userId: user._id,
-      token,
-    };
-  } catch (error) {
-    console.error("Wrong credentials", error);
-    throw new Error("Wrong credentials");
+    console.error('Error creating user:', error.message || error);
+    throw new Error(error.message || 'Unable to create user');
   }
-}
+};
 
+
+//otp verifcatin
+// OTP Verification function
+export async function verifyOtp(email: string, otp: string) {
+    try {
+        await connectToDB();
+        const user = await User.findOne({ email });
+
+        if (!user) {
+            throw new Error("User not found");
+        }
+
+        // Check if OTP is valid and not expired
+        if (user.otp !== otp) {
+            throw new Error("Invalid OTP");
+        }
+
+        if (Date.now() > user.otpExpiration) {
+            throw new Error("OTP has expired");
+        }
+
+        // OTP is valid, mark user as verified
+        user.isVerified = true;
+        user.otp = undefined; // Remove OTP after verification
+        user.otpExpiration = undefined; // Remove OTP expiration
+        await user.save();
+
+        return {
+            success: true,
+            message: "Email verified successfully",
+        };
+    } catch (error: any) {
+        console.error("OTP verification error:", error.message || error);
+        throw new Error(error.message || "Unable to verify OTP");
+    }
+}
 
 
 
